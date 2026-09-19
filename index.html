@@ -83,7 +83,7 @@
   dl{display:grid;grid-template-columns:auto 1fr;gap:3px 16px;margin:0;font-size:13.5px}
   dt{color:var(--muted)}
   dd{margin:0;font-family:var(--mono)}
-  dd.organism{font-family:var(--sans)}
+  dd.organism,dd.tool{font-family:var(--sans)}
   dd .note{font-family:var(--sans);color:var(--muted);font-size:13px}
   /* Badges: green for informational status (UniProt reviewed), neutral for
      metadata categories, amber only where the badge itself is a caution. */
@@ -182,14 +182,33 @@
 </div>
 
 <script>
-// ---- Release settings: the only two lines to edit when publishing. ----------
+// ---- Release settings: the only three lines to edit when publishing. --------
 // APP_VERSION is shown beside the name and in the footer; keep it in step with
 // the README and the release tag. REPO_URL is the GitHub repository, e.g.
-// 'https://github.com/your-name/refseq-lookup'. While it is empty the footer
-// shows no repository links, so a copy without it never has dead links.
-const APP_VERSION = '2.2.1';
-const REPO_URL    = 'https://github.com/LiucongL/refseq-lookup';
+// 'https://github.com/USERNAME/refseq-lookup'. EXPLORER_URL is the GitHub
+// Pages address of the companion Protein Explorer, e.g.
+// 'https://USERNAME.github.io/protein-explorer/'; the entry gets an "Open in
+// Protein Explorer" link to it at ?q=<accession>. While either is empty, or
+// still contains USERNAME, its links are not rendered, so a copy without them
+// never has dead links.
+const APP_VERSION  = '2.2.5';
+const REPO_URL     = 'https://github.com/LiucongL/refseq-lookup';
+const EXPLORER_URL = 'https://liucongl.github.io/protein-explorer/';
 // -----------------------------------------------------------------------------
+const explorerUrl = acc => {
+  const u = String(EXPLORER_URL).trim();
+  if (!/^https:\/\/[^\s"'<>]+$/.test(u) || /USERNAME/.test(u)) return null;
+  return u.replace(/\/*$/, '/') + '?q=' + encodeURIComponent(acc);
+};
+
+// Search the mm10 annotation by transcript accession; this is not a sequence
+// alignment or a coordinate conversion. Keep the cited version on the page,
+// but omit it from the UCSC search because annotation versions can differ.
+function ucscMm10Url(nucleotide, taxonId){
+  const id = String(nucleotide || '').trim().toUpperCase();
+  if (Number(taxonId) !== 10090 || !/^(?:NM|XM|NR|XR)_\d+(?:\.\d+)?$/.test(id)) return null;
+  return 'https://genome.ucsc.edu/cgi-bin/hgTracks?db=mm10&position=' + encodeURIComponent(id.replace(/\.\d+$/, ''));
+}
 
 const ACC_RE    = /^[OPQ][0-9][A-Z0-9]{3}[0-9](-\d+)?$|^[A-NR-Z][0-9]([A-Z][A-Z0-9]{2}[0-9]){1,2}(-\d+)?$/;
 const ID_RE     = /^[A-Z0-9]{1,11}_[A-Z0-9]{1,5}$/;
@@ -399,8 +418,14 @@ async function lookup(raw, ctx = {}){
 
   box.value = q;
   // Keep the address in step with the search so a result can be bookmarked or
-  // linked to (?q=P68871). A file:// page cannot rewrite its address; that is fine.
-  try{ history.replaceState(null, '', '?q=' + encodeURIComponent(q)); }catch{}
+  // linked to (?q=P68871). When a RefSeq search led here through the picker,
+  // the RefSeq accession rides along as &ref=, so a reload still marks that
+  // record and still warns about its version. A file:// page cannot rewrite
+  // its address; that is fine.
+  try{
+    const ref = ctx.refseq && ctx.refseq.toUpperCase() !== q.toUpperCase() ? '&ref=' + encodeURIComponent(ctx.refseq) : '';
+    history.replaceState(null, '', '?q=' + encodeURIComponent(q) + ref);
+  }catch{}
   go.disabled = true;
   go.textContent = 'Looking up…';
   out.setAttribute('aria-busy', 'true');
@@ -667,7 +692,13 @@ function renderEntry(e, asked, { askedAcc = null, via = 'search', askedRefseq = 
       (g.alliance ? ' <span class="note">· <a href="https://www.alliancegenome.org/gene/' + esc(g.alliance) + '" target="_blank" rel="noopener" title="The same gene at the Alliance of Genome Resources">Alliance</a></span>' : '') +
       '</dd>').join('') +
     '<dt>Organism</dt><dd class="organism">' + esc(e.organism?.scientificName || '—') + '</dd>' +
-    '<dt>Length</dt><dd>' + seq.length + ' aa' + lengthNote + '</dd></dl></div>';
+    '<dt>Length</dt><dd>' + seq.length + ' aa' + lengthNote + '</dd>' +
+    // Hand the entry to the companion app: the isoform when one was asked for
+    // and exists, otherwise the primary accession — never the typed search.
+    (explorerUrl(askedIso && isoKnown ? askedIso : primary)
+      ? '<dt>Explore</dt><dd class="tool"><a href="' + esc(explorerUrl(askedIso && isoKnown ? askedIso : primary)) + '" target="_blank" rel="noopener" title="Structure, domains, disorder and sequence for this entry in the companion Protein Explorer">Open in Protein Explorer ↗</a></dd>'
+      : '') +
+    '</dl></div>';
 
   if (notes.length) html += '<div class="notes">' + notes.map(n => '<p class="msg bad">' + n + '</p>').join('') + '</div>';
 
@@ -686,6 +717,7 @@ function renderEntry(e, asked, { askedAcc = null, via = 'search', askedRefseq = 
       const hit = (pm && pm !== 'other-version') || (nm && nm !== 'other-version');
       const ver = pm === 'other-version' || nm === 'other-version';
       const nk = nucKind(r.mrna);
+      const mm10Url = ucscMm10Url(r.mrna, e.organism?.taxonId);
       const askedMark = hit ? ' <span class="mark">(the one you asked for' + ((pm === 'version' || nm === 'version') ? ', cited as this version' : '') + ')</span>'
                       : ver ? ' <span class="warn">(the one you asked for, but UniProt cites a different version)</span>' : '';
       // The CDS is only fetched for a transcript record (a contig's CDS list is
@@ -708,10 +740,14 @@ function renderEntry(e, asked, { askedAcc = null, via = 'search', askedRefseq = 
         copyButton('Copy protein accession', r.protein) +
         (r.mrna ? copyButton('Copy ' + nk + ' accession', r.mrna) : '') +
         cds +
+        (mm10Url ? '<a href="' + esc(mm10Url) + '" target="_blank" rel="noopener" title="Search UCSC Mouse GRCm38/mm10 for ' + esc(r.mrna) + ' without its version suffix; this does not verify the CDS sequence">View on UCSC mm10 ↗</a>' : '') +
         '</div><div class="cds-note" aria-live="polite"></div></div>';
     });
 
     html += '</div>';
+    if (refs.some(r => ucscMm10Url(r.mrna, e.organism?.taxonId))){
+      html += '<p class="msg" style="margin-top:12px"><em>For data aligned to mm10 (GRCm38), use the UCSC links to look up transcript locations.</em></p>';
+    }
     const distinctIso = new Set(refs.map(r => r.isoform).filter(Boolean));
     if (distinctIso.size > 1){
       html += '<p class="msg" style="margin-top:12px">These RefSeq records map to ' + distinctIso.size + ' different isoforms of this entry. Match the isoform to the sequence you are working with.</p>';
@@ -853,9 +889,13 @@ document.getElementById('foot-ver').textContent = 'v' + APP_VERSION;
 
 // A link can open the app on a protein: ?q=P68871, ?q=NP_000509.1, ?q=Dlx5+mouse.
 // This is how another page (the Protein Explorer, say) hands a protein over.
+// &ref=<RefSeq accession> restores the record marking from a search that went
+// through the picker; anything that is not a RefSeq accession is ignored.
 {
-  const q0 = new URLSearchParams(location.search).get('q');
-  if (q0 && q0.trim()) lookup(q0);
+  const params = new URLSearchParams(location.search);
+  const q0 = params.get('q');
+  const ref0 = String(params.get('ref') || '').trim().toUpperCase();
+  if (q0 && q0.trim()) lookup(q0, REFSEQ_RE.test(ref0) ? { refseq: ref0 } : {});
 }
 
 go.addEventListener('click', () => lookup(box.value));
