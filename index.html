@@ -92,7 +92,19 @@
   .tag.xp,.tag.bad{background:var(--ochre-soft);color:var(--ochre)}
 
   .notes{margin-top:14px}
-  .hits{margin-top:22px;border-top:1px solid var(--line)}
+  /* Section label over the RefSeq rows: says where these records came from. */
+  .sect{font-size:13px;color:var(--muted);margin:22px 0 0;padding-bottom:6px;border-bottom:1px solid var(--line)}
+  .sect strong{color:var(--ink);font-weight:500}
+  .hits{margin-top:0}
+  /* Fallback when UniProt links no RefSeq record: search links, each visibly a search. */
+  .fallback{margin-top:12px}
+  .fallback .acts{margin-top:10px}
+  .fallback .acts a::after{content:'\2197';font-size:.72em;margin-left:3px;vertical-align:top;opacity:.75}
+  .sibs{margin-top:16px}
+  .sibs .picker{margin-top:6px}
+  .sibs .picker button{padding:9px 0}
+  .sibs .picker button:last-child{border-bottom:0}
+  .sibs .p-ref{font-family:var(--mono);font-size:13px;color:var(--ink)}
   .hit{border-bottom:1px solid var(--line);padding:16px 0;display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap}
   .hit.asked{border-left:3px solid var(--teal);padding-left:12px}
   .hit .main{flex:1 1 220px;min-width:0}
@@ -148,7 +160,7 @@
 <body>
 <div class="wrap">
   <h1>RefSeq lookup <span class="ver" id="ver"></span></h1>
-  <p class="lede">Find the RefSeq protein and nucleotide records linked from a UniProt entry. Enter an accession, entry name, entry URL, or a protein name plus organism; a RefSeq accession looks up the UniProt entry that cites it. A link can open a protein directly: <code>?q=P68871</code>.</p>
+  <p class="lede">Find the RefSeq protein and nucleotide records linked from a UniProt entry. Enter a UniProt or RefSeq accession, entry name, entry URL, or gene/protein name. Adding an organism helps narrow the results. RefSeq accessions are searched through UniProt.</p>
 
   <div class="panel">
     <label for="q">UniProt or RefSeq accession, or a search</label>
@@ -191,7 +203,7 @@
 // Protein Explorer" link to it at ?q=<accession>. While either is empty, or
 // still contains USERNAME, its links are not rendered, so a copy without them
 // never has dead links.
-const APP_VERSION  = '2.2.5';
+const APP_VERSION  = '2.2.6';
 const REPO_URL     = 'https://github.com/LiucongL/refseq-lookup';
 const EXPLORER_URL = 'https://liucongl.github.io/protein-explorer/';
 // -----------------------------------------------------------------------------
@@ -208,6 +220,29 @@ function ucscMm10Url(nucleotide, taxonId){
   const id = String(nucleotide || '').trim().toUpperCase();
   if (Number(taxonId) !== 10090 || !/^(?:NM|XM|NR|XR)_\d+(?:\.\d+)?$/.test(id)) return null;
   return 'https://genome.ucsc.edu/cgi-bin/hgTracks?db=mm10&position=' + encodeURIComponent(id.replace(/\.\d+$/, ''));
+}
+
+// Fallbacks for an entry UniProt links no RefSeq record to. All three are
+// searches by gene symbol and are labelled as such on the page; none of them
+// establishes that a record encodes this entry's sequence. Symbols are
+// restricted to the characters gene symbols use, so nothing else gets into a URL.
+const SYMBOL_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,29}$/;
+function ncbiGeneSearchUrl(symbol, organism){
+  if (!SYMBOL_RE.test(symbol || '') || !organism) return null;
+  return 'https://www.ncbi.nlm.nih.gov/gene/?term=' + encodeURIComponent(symbol + '[gene] AND "' + organism + '"[orgn]');
+}
+function ucscMm10GeneUrl(symbol, taxonId){
+  if (Number(taxonId) !== 10090 || !SYMBOL_RE.test(symbol || '')) return null;
+  return 'https://genome.ucsc.edu/cgi-bin/hgTracks?db=mm10&position=' + encodeURIComponent(symbol);
+}
+// Other UniProt entries for the same gene in the same organism. gene_exact and
+// organism_id are UniProt's own query fields; the RefSeq filter is applied here
+// on the cross-references that come back, so the page shows only what UniProt cites.
+const SIBLINGS = 'https://rest.uniprot.org/uniprotkb/search?size=25&format=json' +
+                 '&fields=accession,id,protein_name,reviewed,length,xref_refseq&query=';
+function siblingQuery(symbol, taxonId){
+  if (!SYMBOL_RE.test(symbol || '') || !/^\d+$/.test(String(taxonId ?? ''))) return null;
+  return SIBLINGS + encodeURIComponent('gene_exact:' + symbol + ' AND organism_id:' + taxonId);
 }
 
 const ACC_RE    = /^[OPQ][0-9][A-Z0-9]{3}[0-9](-\d+)?$|^[A-NR-Z][0-9]([A-Z][A-Z0-9]{2}[0-9]){1,2}(-\d+)?$/;
@@ -258,7 +293,10 @@ async function request(url, signal, as = 'json'){
   const timer = setTimeout(() => ctl.abort(new DOMException('Timed out', 'TimeoutError')), TIMEOUT_MS);
   try{
     const r = await fetch(url, { signal: ctl.signal });
-    const res = { ok: r.ok, status: r.status, total: Number(r.headers.get('x-total-results')) || null, data: null };
+    // Preserve a genuine zero; missing or malformed totals do not establish coverage.
+    const count = r.headers.get('x-total-results');
+    const total = count != null && /^\d+$/.test(count.trim()) && Number.isSafeInteger(Number(count)) ? Number(count) : null;
+    const res = { ok: r.ok, status: r.status, total, data: null };
     if (r.ok) res.data = as === 'text' ? await r.text() : await r.json();
     return res;
   }catch(err){
@@ -377,6 +415,10 @@ function pickRecord(recs, prot){
 // translation table and exceptions) with the protein UniProt shows. When
 // NCBI's translation is unavailable a standard-code translation stands in,
 // and the wording says so. `ref` is null for a non-canonical isoform's record.
+// Returns { match, bad, text }. `match` is true only when NCBI's own translation
+// (or, failing that, a clean standard-code translation) is identical to the
+// UniProt sequence; the caller copies at once in that case and otherwise holds
+// the sequence back until the user has read the text and clicks again.
 function cdsCheck(nt, ncbiAa, ref, { isoUnknown = false } = {}){
   const n = nt.length;
   const lead = 'CDS ' + n + ' nt as returned by NCBI; any terminal stop is retained';
@@ -384,16 +426,15 @@ function cdsCheck(nt, ncbiAa, ref, { isoUnknown = false } = {}){
   const via = ncbiAa != null ? 'NCBI\'s translation' : 'a standard-code translation (NCBI\'s own translation was unavailable; translation table and exceptions not applied)';
   const frameIssue = ncbiAa == null && n % 3 !== 0;
   const frame = frameIssue ? ' The length is not a multiple of three; the standard-code comparison omits the trailing ' + (n % 3) + ' nucleotide(s). Check the record before using it.' : '';
-  const isoTail = isoUnknown ? ' UniProt does not assign this record to an isoform, so this may simply be another isoform.' : ' Different isoform or version.';
-  if (aa.includes('*')) return { bad: true, text: lead + '. ' + via + ' has an internal stop codon' + (ncbiAa == null ? ', which may only mean the record uses another genetic code or a translation exception' : '') + '. Copied, but check before using.' };
-  if (!ref) return { bad: frameIssue, text: lead + '; ' + via + ' is ' + aa.length + ' aa. Not compared with UniProt: the page holds the canonical isoform only.' + frame };
-  if (aa === ref) return { bad: frameIssue, text: lead + '; ' + via + (frameIssue ? ' matches the UniProt canonical sequence for the complete codons only (' : ' matches the UniProt canonical sequence (') + ref.length + ' aa).' + frame };
-  if (aa.length !== ref.length) return { bad: true, text: lead + '; ' + via + ' is ' + aa.length + ' aa where the UniProt canonical sequence is ' + ref.length + ' aa.' + isoTail + ' Copied, but check before using.' + frame };
+  const isoTail = isoUnknown ? ' UniProt does not assign this record to an isoform, so this may simply be another isoform.' : ' This may reflect an isoform, variant or record-version difference.';
+  if (aa.includes('*')) return { match: false, bad: true, text: lead + '. ' + via + ' has an internal stop codon' + (ncbiAa == null ? ', which may only mean the record uses another genetic code or a translation exception' : '') + '.' };
+  if (!ref) return { match: false, bad: frameIssue, text: lead + '; ' + via + ' is ' + aa.length + ' aa. Not compared with UniProt: the page holds the canonical isoform only.' + frame };
+  if (aa === ref) return { match: !frameIssue, bad: frameIssue, text: lead + '; ' + via + (frameIssue ? ' matches the UniProt canonical sequence for the complete codons only (' : ' matches the UniProt canonical sequence (') + ref.length + ' aa).' + frame };
+  if (aa.length !== ref.length) return { match: false, bad: true, text: lead + '; ' + via + ' is ' + aa.length + ' aa where the UniProt canonical sequence is ' + ref.length + ' aa.' + isoTail + frame };
   const diffs = [];
   for (let i = 0; i < aa.length; i++) if (aa[i] !== ref[i]) diffs.push(ref[i] + (i + 1) + aa[i]);
-  return { bad: true, text: lead + '; ' + via + ' differs from the UniProt canonical sequence at ' + diffs.length + (diffs.length === 1 ? ' position' : ' positions') + ' (' + diffs.slice(0, 6).join(', ') + (diffs.length > 6 ? ', …' : '') + ').' + isoTail + ' Copied, but check before using.' + frame };
+  return { match: false, bad: true, text: lead + '; ' + via + ' differs from the UniProt canonical sequence at ' + diffs.length + (diffs.length === 1 ? ' position' : ' positions') + ' (' + diffs.slice(0, 6).join(', ') + (diffs.length > 6 ? ', …' : '') + ').' + isoTail + frame };
 }
-
 // Does a RefSeq id cited by UniProt answer the one asked for? Without a
 // version in the ask, any version matches; the row says which one UniProt cites.
 function refseqMatch(cited, asked){
@@ -483,7 +524,7 @@ async function lookup(raw, ctx = {}){
         : 'Nothing in UniProt matches that. Check the accession, or search by protein name plus organism.') + '</p>');
     }
     if (entry.entryType === 'Inactive') return renderInactive(entry);
-    renderEntry(entry, up, { askedAcc, via, askedRefseq });
+    renderEntry(entry, up, { askedAcc, via, askedRefseq, signal });
   }catch(err){
     if (err?.name === 'AbortError' || mySeq !== lookupSeq) return;
     const msg = err?.name === 'TimeoutError'
@@ -612,7 +653,7 @@ function geneDbLinks(e){
   return links;
 }
 
-function renderEntry(e, asked, { askedAcc = null, via = 'search', askedRefseq = null } = {}){
+function renderEntry(e, asked, { askedAcc = null, via = 'search', askedRefseq = null, signal = null } = {}){
   copyPayloads.clear(); cdsPayloads.clear();
   const primary = e.primaryAccession;
   const refs = (e.uniProtKBCrossReferences || [])
@@ -678,12 +719,16 @@ function renderEntry(e, asked, { askedAcc = null, via = 'search', askedRefseq = 
     if (!ms.length) notes.push('This entry was found by searching for ' + esc(askedRefseq) + ', but none of the RefSeq records UniProt cites for it is that accession.');
     else if (!ms.some(m => m !== 'other-version')) notes.push('UniProt cites ' + esc(askedRefseq.replace(/\.\d+$/, '')) + ' at a different version from the one asked for; the record is marked below.');
   }
+  let sibJob = null;   // the sibling search starts once its block is on the page
+  const gene = e.genes?.[0]?.geneName?.value || '';
+  const organism = e.organism?.scientificName || '';
+  const taxonId = e.organism?.taxonId;
   const lengthNote = askedIso && isoKnown && askedIso !== canonicalIso
     ? ' <span class="note">canonical sequence — isoform ' + esc(isoSuffix) + ' may differ</span>' : '';
 
   let html = '<div class="ident"><p class="name" tabindex="-1">' + esc(nameOf(e)) +
     (reviewed ? ' <span class="tag">UniProt reviewed</span>' : ' <span class="tag neutral">UniProt unreviewed</span>') + '</p><dl>' +
-    '<dt>Accession</dt><dd><a href="https://www.uniprot.org/uniprotkb/' + encodeURIComponent(primary) + '/entry" target="_blank" rel="noopener">' + esc(primary) + '</a></dd>' +
+    '<dt>UniProt accession</dt><dd><a href="https://www.uniprot.org/uniprotkb/' + encodeURIComponent(primary) + '/entry" target="_blank" rel="noopener">' + esc(primary) + '</a></dd>' +
     '<dt>Entry name</dt><dd>' + esc(e.uniProtkbId || '—') + '</dd>' +
     (e.genes?.[0]?.geneName?.value ? '<dt>Gene</dt><dd>' + esc(e.genes[0].geneName.value) + '</dd>' : '') +
     (geneIds.length ? '<dt>NCBI Gene</dt><dd>' + geneIds.map(id => '<a href="https://www.ncbi.nlm.nih.gov/gene/' + encodeURIComponent(id) + '" target="_blank" rel="noopener">' + esc(id) + '</a>').join(', ') + '</dd>' : '') +
@@ -702,13 +747,25 @@ function renderEntry(e, asked, { askedAcc = null, via = 'search', askedRefseq = 
 
   if (notes.length) html += '<div class="notes">' + notes.map(n => '<p class="msg bad">' + n + '</p>').join('') + '</div>';
 
+  // The label says where these records come from: the app shows the RefSeq
+  // records UniProt itself cites for the entry, not everything RefSeq holds for the gene.
+  html += '<p class="sect"><strong>RefSeq records linked by UniProt</strong>' + (refs.length ? '' : ' — none for this entry') + '</p>';
+
   if (!refs.length){
-    html += '<p class="msg bad" style="margin-top:18px">This entry has no RefSeq cross-reference. ' +
-      'BLAST the sequence against NCBI RefSeq Protein to look for a matching or closely related record, and verify organism and sequence identity before treating a hit as the corresponding RefSeq record.</p>';
-    if (seq){
-      const blast = 'https://blast.ncbi.nlm.nih.gov/Blast.cgi?PROGRAM=blastp&PAGE_TYPE=BlastSearch&DATABASE=refseq_protein&QUERY=' + encodeURIComponent(seq);
-      html += '<div class="acts" style="margin-top:10px"><a href="' + blast + '" target="_blank" rel="noopener">BLAST against RefSeq Protein</a></div>';
-    }
+    const geneSearch = ncbiGeneSearchUrl(gene, organism);
+    const mm10Gene = ucscMm10GeneUrl(gene, taxonId);
+    const sibUrl = siblingQuery(gene, taxonId);
+    html += '<div class="fallback"><p class="msg bad">UniProt lists no RefSeq link for ' + esc(primary) + '. ' +
+      'RefSeq records for the gene may still exist; this page shows only the links UniProt supplies and has not searched RefSeq itself. ' +
+      'The links below are searches, not matches: verify organism and sequence before treating anything they find as the RefSeq record for this protein.</p>' +
+      '<div class="acts">' +
+      (geneSearch ? '<a href="' + esc(geneSearch) + '" target="_blank" rel="noopener" title="Search NCBI Gene for the gene symbol ' + esc(gene) + ' in ' + esc(organism) + '; the gene page lists its RefSeq transcripts and proteins">Search NCBI Gene for ' + esc(gene) + '</a>' : '') +
+      (seq ? '<a href="https://blast.ncbi.nlm.nih.gov/Blast.cgi?PROGRAM=blastp&PAGE_TYPE=BlastSearch&DATABASE=refseq_protein&QUERY=' + encodeURIComponent(seq) + '" target="_blank" rel="noopener" title="Align this entry\'s sequence against NCBI RefSeq Protein to find matching or closely related records">BLAST against RefSeq Protein</a>' : '') +
+      (mm10Gene ? '<a href="' + esc(mm10Gene) + '" target="_blank" rel="noopener" title="Search the UCSC Mouse GRCm38/mm10 browser for the gene symbol ' + esc(gene) + '; this is a symbol search, not a sequence match">Search UCSC mm10 for ' + esc(gene) + '</a>' : '') +
+      '</div>' +
+      (sibUrl ? '<div class="sibs" id="sibs" aria-live="polite"><p class="msg">Looking for other UniProt entries for ' + esc(gene) + ' in ' + esc(organism) + ' that cite RefSeq records…</p></div>' : '') +
+      '</div>';
+    sibJob = sibUrl ? () => loadSiblings(sibUrl, primary, gene, organism, taxonId, signal) : null;
   } else {
     html += '<div class="hits">';
     refs.forEach(r => {
@@ -727,8 +784,8 @@ function renderEntry(e, asked, { askedAcc = null, via = 'search', askedRefseq = 
       if (r.mrna && nk === 'mRNA'){
         const id = String(cdsPayloads.size + 1);
         const comparable = !r.isoform || r.isoform === canonicalIso;
-        cdsPayloads.set(id, { nuc: r.mrna, prot: r.protein, ref: comparable && seq ? seq : null, isoUnknown: hasIsoforms && !r.isoform });
-        cds = '<button data-cds-id="' + id + '" title="Fetch the coding nucleotide sequence of ' + esc(r.mrna) + ' from NCBI and copy it as returned; any terminal stop is retained">Copy CDS</button>';
+        cdsPayloads.set(id, { nuc: r.mrna, prot: r.protein, ref: comparable && seq ? seq : null, isoUnknown: hasIsoforms && !r.isoform, result: null });
+        cds = '<button data-cds-id="' + id + '" title="Fetch the coding nucleotide sequence of ' + esc(r.mrna) + ' from NCBI; copied at once only if the translation check matches the UniProt sequence and the protein version agrees, otherwise held until you click again">Copy CDS</button>';
       }
       html += '<div class="hit' + (hit || ver ? ' asked' : '') + '"><div class="main"><div class="acc">' +
         '<a href="https://www.ncbi.nlm.nih.gov/protein/' + encodeURIComponent(r.protein) + '" target="_blank" rel="noopener">' + esc(r.protein) + '</a>' +
@@ -753,7 +810,7 @@ function renderEntry(e, asked, { askedAcc = null, via = 'search', askedRefseq = 
       html += '<p class="msg" style="margin-top:12px">These RefSeq records map to ' + distinctIso.size + ' different isoforms of this entry. Match the isoform to the sequence you are working with.</p>';
     }
     if (cdsPayloads.size){
-      html += '<p class="msg" style="margin-top:12px">Copy CDS fetches the coding nucleotide sequence of the transcript from NCBI on request and copies it as returned; any terminal stop codon is retained. It also compares NCBI\'s translation of that CDS with the UniProt sequence and reports the result under the row.</p>';
+      html += '<p class="msg" style="margin-top:12px">Copy CDS fetches the coding nucleotide sequence of the transcript from NCBI on request and compares NCBI\'s translation of it with the UniProt sequence. If they match, the CDS is copied at once, as returned, with any terminal stop codon retained. If they differ, or cannot be compared, nothing is copied: the result is shown under the row and the button becomes <em>Copy anyway</em>.</p>';
     }
     if (refs.some(r => r.kind.cls === 'xp')){
       html += '<p class="msg" style="margin-top:12px">XP_ records are computational models. Review status (reviewed, validated, provisional) is stated on each NCBI record, not by the prefix; prefer a known (NP_) record when one covers your isoform.</p>';
@@ -770,6 +827,61 @@ function renderEntry(e, asked, { askedAcc = null, via = 'search', askedRefseq = 
   }
 
   show(html);
+  if (sibJob) sibJob();
+}
+
+// Other UniProt entries for the same gene and organism that cite RefSeq
+// records. Runs after the entry is on the page; the lookup's signal cancels it
+// when another lookup starts, and nothing is written once the block has gone.
+async function loadSiblings(url, primary, gene, organism, taxonId, signal){
+  const box2 = document.getElementById('sibs');
+  if (!box2) return;
+  const sig = signal || new AbortController().signal;
+  let html;
+  try{
+    const r = await request(url, sig);
+    if (sig.aborted || !box2.isConnected) return;
+    if (!r.ok) throw new HttpError(r.status);
+    const got = (r.data.results || []).length;
+    // Coverage: one page of results against UniProt's own total. Without the
+    // total, or with more entries than the page, the search was not complete
+    // and the wording says so; a page that holds every entry is a full check.
+    const total = r.total;
+    const complete = total != null && got === total;
+    const scope = complete ? '' : ' among the ' + got + (total != null ? ' of ' + total : '') + ' UniProt entries checked';
+    const full = ' <a href="https://www.uniprot.org/uniprotkb?query=' + encodeURIComponent('gene_exact:' + gene + ' AND organism_id:' + taxonId) + '" target="_blank" rel="noopener">See all' + (total != null ? ' ' + total : '') + ' at UniProt</a>.';
+    const sibs = (r.data.results || [])
+      .filter(x => x.primaryAccession && x.primaryAccession !== primary)
+      .map(x => ({
+        acc: x.primaryAccession,
+        reviewed: (x.entryType || '').includes('Swiss-Prot'),
+        length: x.sequence?.length,
+        refs: (x.uniProtKBCrossReferences || []).filter(y => y.database === 'RefSeq' && y.id)
+          .map(y => ({ protein: String(y.id), mrna: (y.properties || []).find(p => p.key === 'NucleotideSequenceId')?.value || '' }))
+      }))
+      .filter(x => x.refs.length)
+      .sort((a, b) => Number(b.reviewed) - Number(a.reviewed));
+    if (!sibs.length){
+      html = complete
+        ? '<p class="msg">No other RefSeq-linked entry was found for ' + esc(gene) + ' in ' + esc(organism) + ' in this UniProt search.</p>'
+        : '<p class="msg">No RefSeq-linked entry found' + scope + ' for ' + esc(gene) + ' in ' + esc(organism) + '; the check was not complete.' + full + '</p>';
+    } else {
+      html = '<p class="msg">' + (sibs.length === 1 ? 'One other UniProt entry' : sibs.length + ' other UniProt entries') + ' for ' + esc(gene) + ' in ' + esc(organism) +
+        ' cite' + (sibs.length === 1 ? 's' : '') + ' RefSeq records' + scope + '.' + (complete ? '' : full) +
+        ' Opening one shows that entry\'s own records, and Copy CDS then compares against that entry\'s sequence, not ' + esc(primary) + '\'s:</p><div class="picker">' +
+        sibs.map(s => '<button data-acc="' + esc(s.acc) + '">' + esc(s.acc) +
+          (s.reviewed ? '<span class="tag">UniProt reviewed</span>' : '<span class="tag neutral">UniProt unreviewed</span>') +
+          (s.length ? ' <span class="p-acc">' + s.length + ' aa</span>' : '') +
+          '<br><span class="p-ref">' + s.refs.slice(0, 4).map(rf => esc(rf.protein) + (rf.mrna ? ' · ' + esc(rf.mrna) : '')).join('; ') + (s.refs.length > 4 ? '; …' : '') + '</span></button>').join('') +
+        '</div>';
+    }
+  }catch(err){
+    if (err?.name === 'AbortError' || sig.aborted || !box2.isConnected) return;
+    html = '<p class="msg bad">Could not check UniProt for other entries of ' + esc(gene) + ' in ' + esc(organism) +
+      (err?.name === 'TimeoutError' ? ' (no answer within ' + Math.round(TIMEOUT_MS / 1000) + ' seconds)' : err instanceof HttpError ? ' (HTTP ' + err.status + ')' : '') +
+      '. <a href="https://www.uniprot.org/uniprotkb?query=' + encodeURIComponent('gene_exact:' + gene + ' AND organism_id:' + taxonId) + '" target="_blank" rel="noopener">Search at UniProt</a> instead.</p>';
+  }
+  box2.innerHTML = html;
 }
 
 out.addEventListener('click', ev => {
@@ -799,6 +911,7 @@ async function copyText(b, text, op){
     ta.select();
   }
 
+  if (op !== copyOp || !b.isConnected) return false;
   const label = b.dataset.label ??= b.textContent;
   clearTimeout(copyTimers.get(b));
   b.textContent = copied ? 'Copied' : 'Copy by hand';
@@ -814,16 +927,31 @@ out.addEventListener('click', ev => {
 });
 
 // Copy CDS: fetch the coding sequence from NCBI, check it against the protein,
-// then copy. The fetch is not tied to the lookup's signal, but nothing is
-// copied or reported once the row has left the page.
+// then copy only if the check passed. A CDS whose translation differs from the
+// UniProt sequence, or cannot be compared with it, is held: the result is shown
+// under the row and the button becomes "Copy anyway", so nothing reaches the
+// clipboard before the note has been seen. The fetch is not tied to the
+// lookup's signal, but nothing is copied or reported once the row has left the page.
 out.addEventListener('click', async ev => {
   const b = ev.target.closest('button[data-cds-id]');
   if (!b || b.disabled) return;
   const job = cdsPayloads.get(b.dataset.cdsId);
   if (!job) return;
+  const hit = b.closest('.hit');
+  const note = hit?.querySelector('.cds-note');
+  b.dataset.label ??= b.textContent;
+  // Fetched and checked already: a matching CDS copies again at once, and a
+  // held one copies now, on this second click.
+  if (job.result){
+    const op = ++copyOp;
+    const handled = await copyText(b, job.result.seq, op);
+    if (handled && op === copyOp && b.isConnected && note){
+      note.textContent = job.checkText + (job.held ? ' Copy requested after review; the check above still applies.' : '');
+    }
+    return;
+  }
   const op = ++copyOp;
-  const note = b.closest('.hit')?.querySelector('.cds-note');
-  const label = b.dataset.label ??= b.textContent;
+  const restore = () => { b.disabled = false; b.textContent = b.dataset.label; };
   clearTimeout(copyTimers.get(b));
   b.disabled = true;
   b.textContent = 'Fetching…';
@@ -848,19 +976,22 @@ out.addEventListener('click', async ev => {
     }
     const check = cdsCheck(rec.seq, ncbiAa, job.ref, { isoUnknown: job.isoUnknown });
     const version = rec.protId !== job.prot ? ' NCBI labels this CDS ' + rec.protId + ' where UniProt cites ' + job.prot + '.' : '';
+    const held = !check.match || !!version;
+    job.result = rec;
+    job.checkText = check.text + version;
+    job.held = held;
     // Superseded by a later copy action: report the check, leave the clipboard alone.
     const superseded = op !== copyOp;
-    const text = superseded
-      ? check.text.replace(' Copied, but check before using.', ' Check before using.') + version + ' Not copied: a later copy action took the clipboard. Click again to copy this one.'
-      : check.text + version;
+    const text = check.text + version + (held
+      ? ' Not copied. If this is still the record you want, click Copy anyway.'
+      : superseded ? ' Not copied: a later copy action took the clipboard. Click again to copy this one.' : '');
     if (note){ note.textContent = text; note.classList.toggle('bad', check.bad || !!version); }
-    b.disabled = false;
-    b.textContent = label;
-    if (!superseded) await copyText(b, rec.seq, op);
+    if (held) b.dataset.label = 'Copy anyway';
+    restore();
+    if (!held && !superseded) await copyText(b, rec.seq, op);
   }catch(err){
     if (!b.isConnected) return;
-    b.disabled = false;
-    b.textContent = label;
+    restore();
     if (note){
       note.textContent = err?.name === 'TimeoutError' ? 'NCBI did not answer within ' + Math.round(TIMEOUT_MS / 1000) + ' seconds; try again.'
         : err instanceof HttpError && err.status === 429 ? 'NCBI is rate-limiting requests (HTTP 429). Wait a few seconds and try again.'

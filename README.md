@@ -2,91 +2,118 @@
 
 A lightweight web app to find RefSeq protein and nucleotide records linked from UniProt, copy coding sequences, and link to gene pages at MGI, HGNC, FlyBase and other organism databases.
 
-It answers one question quickly — **which RefSeq records belong to this UniProt entry?** — by listing the records UniProt cites, linking each one to NCBI, copying accessions and coding sequences (each coding sequence checked against the protein), and linking the gene to its page at the organism's own database.
 
-Enter a UniProt accession (`P68871`, or an isoform such as `P68871-2`), an entry name (`P53_HUMAN`), a UniProt entry URL, or a protein or gene name plus organism (`Dlx5 mouse`), and press **Look up**. A RefSeq accession (`NP_…`, `XP_…`, `YP_…`, `WP_…`, `AP_…`, `NM_…`, `XM_…`) works in the other direction: it finds the UniProt entry that cites it and marks the record you asked for.
-
-A link can open the app on a protein directly, so another page (Protein Explorer, for example) or a bookmark can hand a protein over: `?q=P68871`, `?q=P68871-2`, `?q=NP_000509.1` or `?q=Dlx5+mouse`. The address updates as you look things up, so the address bar always links to the result on screen.
-
-Current version: **v2.2.5**, shown beside the app name in the header and in the footer.
+Version **2.2.6**. A single HTML file with no build step or application backend. It runs in the browser and uses the [UniProt REST API](https://www.uniprot.org/help/api) and, when you request a CDS, [NCBI E-utilities](https://www.ncbi.nlm.nih.gov/books/NBK25501/). This is an independent tool, not affiliated with NCBI or UniProt.
 
 - **Open the app:** **https://liucongl.github.io/refseq-lookup/** — no account needed.
 - **Source code and releases:** **https://github.com/LiucongL/refseq-lookup**
 
+## What you can enter
 
-## What you get
+| Input | Example | What happens |
+| --- | --- | --- |
+| UniProt accession | `P68871` | Fetches the entry directly. A secondary accession opens the entry that now holds it, and says so. |
+| Free text | `Foxo1`, `Dlx5 mouse`, `insulin human` | Searches UniProt; when several entries match, you pick one. Adding an organism helps narrow the results but is optional. |
+| RefSeq accession | `NP_000509.1`, `NM_000518` | Searches UniProt for an entry citing that accession. When found, marks the cited record and points out a different cited version. A valid RefSeq record may have no matching UniProt result. |
+| UniProt entry name | `P53_HUMAN` | Searches by entry name. |
+| UniProt URL | `https://www.uniprot.org/uniprotkb/P68871/entry` | Takes the accession from the address. |
 
-- **The entry:** protein name, UniProt review status, accession, entry name, gene, NCBI Gene ID, organism and length.
-- **The gene's own database page**, where UniProt cites one: MGI (mouse), HGNC (human), RGD (rat), FlyBase, ZFIN (zebrafish), WormBase and SGD (yeast), with a second link to the same gene at the Alliance of Genome Resources. These pages hold what this app deliberately does not: genomic location, function, phenotypes, expression and orthologs.
-- **One row per RefSeq record:** the protein accession, the nucleotide record UniProt pairs with it (labelled mRNA, ncRNA or genomic), the isoform it is assigned to, and whether the record is *known* (`NP_`), *model* (`XP_`) or *non-redundant* (`WP_`).
-- **Copy buttons** for each accession, and **Copy CDS**, which fetches the coding nucleotide sequence of the transcript from NCBI, checks it against the protein, and copies it.
-- **The UniProt canonical sequence**, as FASTA or as plain residues.
-- When an entry has no RefSeq cross-reference, a link that starts a BLAST search of the sequence against NCBI RefSeq Protein.
+A UniProt isoform accession can also be entered. The app marks records assigned to that isoform, but the sequence displayed and used for CDS comparisons is the entry's **canonical sequence**. It does not fetch alternative isoform sequences.
 
-## How it works
+## What the results show
 
-The app is plain HTML and JavaScript, hosted as a static page. It has no application backend of its own. Data are requested from public services when you look something up.
+- Protein name, UniProt accession, entry name, gene, organism, length and UniProt review status.
+- NCBI Gene links and links to MGI, HGNC, RGD, FlyBase, ZFIN, WormBase, SGD and the Alliance of Genome Resources where UniProt supplies the relevant cross-references. These direct links use database identifiers, not guessed gene symbols.
+- **RefSeq records linked by UniProt**: each RefSeq protein and its associated nucleotide record, the record category (for example, known `NP_`, model `XP_`, non-redundant `WP_`), and an isoform assignment when supplied. A nucleotide record may be an mRNA, ncRNA or genomic record.
+- Links to the NCBI records and buttons to copy accessions. Transcript rows also offer **Copy CDS**.
+- For mouse transcripts, a **View on UCSC mm10** link.
+- The UniProt canonical sequence, copyable as FASTA or plain text.
 
-| Information | Source |
-|---|---|
-| Entry, sequence, isoforms and all cross-references (RefSeq, NCBI Gene, MGI, HGNC, …) | [UniProt](https://www.uniprot.org/) REST API |
-| Coding sequence and NCBI's translation of it, on request | [NCBI E-utilities](https://www.ncbi.nlm.nih.gov/books/NBK25501/) (`efetch`, `fasta_cds_na` and `fasta_cds_aa`) |
-| Gene pages | Links only — nothing is fetched from MGI, HGNC, the Alliance or the other databases |
-| Typeface | IBM Plex, loaded from Google Fonts; the app falls back to system fonts without it |
+**Companion app.** When its address is configured, each entry has **Open in Protein Explorer**, which opens the [Protein Explorer](https://liucongl.github.io/protein-explorer/) on that accession for structure, domains, disorder and sequence information. 
 
-The app does not require an account or maintain its own server-side search history. Lookups are sent to UniProt, and Copy CDS requests to NCBI. Those providers, Google Fonts and the website host may log requests; the browser may also retain history and cached data. Searches should not be considered private or anonymous.
+## When UniProt lists no RefSeq link
 
-## Reading the results
+The app shows the cross-references UniProt publishes. An empty list does **not** establish that no RefSeq record exists for the gene, or that no identical RefSeq protein exists. The app has not searched RefSeq itself.
 
-**The app reports the cross-references UniProt publishes. It does not align sequences or decide for itself which RefSeq record corresponds to a protein.**
+Where the required information is available, it offers:
 
-- **No RefSeq row does not mean no RefSeq record.** UniProt links only some RefSeq records. For an entry without one, use the BLAST link and confirm organism and sequence identity before treating a hit as the corresponding record.
-- **The accession prefix is a record category, not a review status.** `NP_`/`NM_` records are "known" and `XP_`/`XM_` records are computational models, but whether a record is reviewed, validated or provisional is stated inside each NCBI record and is not inferred here. Known records are listed first.
-- **Isoforms.** UniProt assigns some RefSeq records to a specific isoform and leaves others unassigned. When you ask for an isoform (`P68871-2`), the app marks the records assigned to it, and says plainly when the remaining records are assigned to *other* isoforms or have *no assignment* — an unassigned record may or may not be the isoform you want. An isoform number asked for on a secondary (merged) accession is not carried over to the new entry, because nothing guarantees the numbering survived.
-- **Versions.** RefSeq accessions carry a version (`NP_000509.1`). If you look up a version UniProt does not cite, the app finds the entry through the accession without its version and warns that the cited version differs. A different version can be a different sequence.
-- **Secondary and obsolete UniProt accessions.** A secondary accession opens the entry that now holds it, with a note. A deleted or merged accession is reported as inactive, with the entries it was merged into when UniProt names them.
-- **Gene-page links come from UniProt's cross-references, never from a guess by gene symbol,** and an identifier that does not match the database's format is dropped rather than turned into a link. The Alliance link appears only when UniProt also cites the Alliance record for that gene. For worm proteins the WormBase gene ID is used, not the transcript name UniProt lists first.
-- **Genome assembly.** The app shows no coordinates itself. When you take a location from MGI, HGNC or the Alliance into a genome browser such as IGV, check the assembly: these sites report current assemblies (GRCm39/mm39 for mouse, GRCh38 for human).
-- **Mouse mm10 coordinates:** Mouse transcript records include a **View on UCSC mm10** link to look up their genomic locations on GRCm38/mm10. Searches use the accession without its version; the annotation may differ from the current RefSeq record.
+- **Search NCBI Gene**, using the gene symbol and organism, to find gene pages and their transcript and protein records.
+- **BLAST against RefSeq Protein**, using the displayed UniProt sequence.
+- For mouse, **Search UCSC mm10**, using the gene symbol.
+- **Other UniProt entries** found by gene symbol and organism that have RefSeq links, with their review status, lengths and cited RefSeq accessions.
 
-### Copy CDS
+These are routes to candidate records, not a declaration that they encode the sequence you started with. Check organism, transcript and sequence before choosing a record. Equal protein lengths alone do not establish sequence identity.
 
-Copy CDS is offered for transcript records (`NM_`, `XM_`) only. It copies the coding sequence **exactly as NCBI returns it, with any terminal stop codon retained**, and only after finding the CDS whose `protein_id` is the protein in that row — never simply the first CDS in the record. If NCBI returns something that is not valid FASTA, nothing is copied.
+The related-entry search checks up to **25 UniProt entries** in one request. If UniProt reports more results, or does not provide a usable total, the page states the limited coverage and links to the full search. Finding none among those entries is not an exhaustive negative result.
 
-Under the row, the app reports a check of what it copied: NCBI's own translation of that CDS is compared with the UniProt canonical sequence, and any difference is listed (length, or the substituted positions). Read this note before using the sequence.
+**Selecting another UniProt entry changes the comparison target.** Copy CDS then checks against the newly opened entry's canonical sequence, not the sequence you originally looked up. For example, a match after leaving a Clint1 entry does not establish a match to the original entry.
 
-- The comparison is made only for records of the canonical isoform or with no isoform assignment, because the canonical sequence is the only one the page holds. For other isoforms the note gives the translated length and says no comparison was made.
-- A mismatch is not necessarily an error: it can be another isoform, another record version, or a natural variant.
-- If NCBI's translation is unavailable, a standard-genetic-code translation stands in and the note says so; records that use another translation table or a translational exception can then show spurious differences.
+## CDS checks and copying
 
-## Other things to know
+**Copy CDS** fetches the transcript's coding sequences and their translations from NCBI. It selects the CDS by the RefSeq protein's `protein_id`, never simply the first CDS returned. An exact protein version is preferred; a different version of the same protein accession is flagged and held for review. Malformed FASTA or a missing corresponding CDS is refused.
 
-- **Search results:** a name search shows the first six matches, with a link to the full result list at UniProt. Adding the organism, or pasting the accession, is the quickest way to the right entry.
-- **NCBI request rate:** NCBI allows three requests per second per IP address without an API key. The app starts its own requests about 400 ms apart and reuses what it has already fetched, so several Copy CDS clicks in a row take a moment instead of going out as one burst. This limits only what this page sends: other tabs, other tools, or colleagues behind the same institutional IP address count towards the same limit, so NCBI can still refuse a request. The app then says it was rate-limited (HTTP 429) and the click can be repeated.
-- **Clipboard:** a Copy CDS whose sequence arrives after you have clicked another copy button does not copy; its row still shows the sequence check and says it was not copied. A refusal that arrives late for such an overtaken copy does not open the copy-by-hand box either. This covers copies that are still waiting for NCBI; a clipboard write the browser has already started cannot be recalled, so if you clicked several copy buttons in quick succession, paste and check before relying on the clipboard. If the browser refuses clipboard access for the current copy, a box opens with the text selected so it can be copied by hand; a button reads "Copied" only after the browser has accepted the write.
-- **Availability:** public services can be slow or unavailable. Requests time out after 15 seconds with a message saying which service did not answer. A failed request is not evidence that a record does not exist.
-- **Companion app.** Each entry has Open in Protein Explorer, which opens the [Protein Explorer](https://liucongl.github.io/protein-explorer/) on the same accession, with structure, domains, disorder and sequence. If you host your own copy, point it at your own Explorer by editing the EXPLORER_URL line in the release settings at the top of the script; the link is hidden until that line holds a real address.
+- **Matching translation and protein version:** copies the CDS immediately, as NCBI returns it, including any terminal stop codon. The row reports the comparison.
+- **Different sequence, different protein version, or no comparison available:** the first click copies nothing. The row explains the result, and the button becomes **Copy anyway**. A further click explicitly copies that record; it does not make the comparison pass.
 
-## Running and hosting
+The comparison uses the canonical UniProt sequence. Records explicitly assigned to other isoforms are not compared; records without an isoform assignment can be compared with the canonical sequence. When NCBI's translation is unavailable, the app uses a standard-genetic-code translation and says so. This fallback does not apply alternative genetic codes or translation exceptions; a complete matching fallback translation can still permit immediate copying.
 
-Use the app from a static web host over HTTPS for reliable browser features such as clipboard access. A downloaded HTML file may also work in a desktop browser, but it still needs internet access for database requests. Local-file handling varies between browsers and mobile file viewers; the hosted link is the simplest option.
+A sequence match is useful evidence for choosing a CDS, not validation of your primer design, template or final construct. A mismatch may reflect an isoform, variant, record version or another sequence discrepancy.
 
-Two lines at the top of the script in `index.html` are the release settings. `APP_VERSION` sets the version shown in the header and footer; keep it consistent with this README and any release tag. `REPO_URL` is the address of the GitHub repository; once set, the footer links to this README, the source code and the issue tracker. While it is empty those links are not shown.
+Accession prefixes describe record categories. RefSeq status such as REVIEWED, VALIDATED or PROVISIONAL is stated on the NCBI record and is not shown here. It is separate from UniProt's reviewed/unreviewed status and does not establish identity between the two databases' sequences.
+
+## Mouse coordinates and mm10
+
+For work aligned to **mm10 (GRCm38)**, the UCSC links search that assembly's annotation by transcript accession without its version suffix, or by gene symbol when no transcript is linked. They do not convert coordinates or verify that the annotation matches the copied CDS.
+
+Check the transcript and coding exons in UCSC, then copy the displayed `chr:start-end` position into IGV with **mm10/GRCm38** selected. A gene-symbol result can cover the gene rather than a particular CDS, and the mm10 annotation may lack the transcript you want.
+
+## Limits and data requests
+
+- **Search coverage:** free-text searches show up to six choices, with a full-results link when a larger total is reported. RefSeq input searches UniProt's cross-references and text; it is not a direct NCBI record lookup.
+- **Availability:** database requests time out after 15 seconds once started. An unavailable service is not evidence that a record is absent.
+- **NCBI rate:** the page starts its NCBI requests at least 400 ms apart and reuses successful responses. This limits this page's traffic; other tabs and users sharing an IP can still cause HTTP 429. Wait before retrying.
+- **Clipboard:** if the browser refuses a copy, the app opens a dialog for copying by hand. A pending CDS fetch cannot overwrite a later copy action. A clipboard write already started by the browser cannot be cancelled, so after rapid successive copies, check what you paste.
+
+Lookups and related-entry queries go to UniProt; CDS requests go to NCBI. Gene-database and UCSC links open those services when clicked. The BLAST link sends the displayed protein sequence to NCBI. The page also loads its typeface from Google Fonts and falls back to system fonts if unavailable.
+
+The app has no account system or application backend that stores searches. The host and external providers may log requests, and the browser may retain history or cached data. Searches should not be treated as private or anonymous.
+
+## Linking to a result
+
+You can share or bookmark a lookup using its page address. On the hosted app, look up an entry and copy the address from your browser, or save it as a bookmark. The address updates automatically as you search; you do not need to edit it yourself.
+
+To create a link manually, add `?q=` followed by an accession or search term to the app address. For example, `?q=P68871` opens that UniProt entry; `?q=NP_000509.1` searches for that RefSeq accession; and `?q=Dlx5+mouse` runs a text search. The `+` represents a space.
+
+When a RefSeq search goes through the picker, the app may also add `&ref=<RefSeq accession>` to preserve the requested-record marking after reload. Keep the complete address when sharing. Database records can change, so a bookmark repeats the lookup rather than preserving a snapshot of the sequence.
+
+## Background
+
+I originally developed this app to gather information for planning protein expression constructs. It can also be used for other tasks that need RefSeq records, coding sequences or links to gene information. The source is available to adapt for more specific workflows.
+
+For cloning work, the app helps collect and compare information; it does not design primers or validate an expression construct. Choose the transcript and coding sequence appropriate for your experiment, including whether to retain the terminal stop codon when making a fusion.
+
+## Running your own copy and customization
+
+Open `refseq-lookup-v2.2.6.html` in a browser to try this draft. No build step is needed. You can modify the source for more specific workflows and host your copy on GitHub Pages or another static host. HTTPS hosting is recommended for browser features such as clipboard access. A downloaded HTML file still needs internet access for database requests, and local-file behavior varies by browser.
+
+When the release is ready, set your addresses and publish a copy as `index.html` on GitHub Pages. Update this README and the version in `CITATION.cff` at that time. Use the opening description from this README for the description in `CITATION.cff` and GitHub About; it also appears in the page metadata. The release settings near the top of the script are:
+
+```js
+const APP_VERSION  = '2.2.6';
+const REPO_URL     = 'https://github.com/LiucongL/refseq-lookup';
+const EXPLORER_URL = 'https://liucongl.github.io/protein-explorer/';
+```
+
+If you host your own copy, change `REPO_URL` and `EXPLORER_URL` to your addresses. Set either to an empty string to hide its links. 
 
 ## Reporting problems
 
-**Issue tracker:** **https://github.com/LiucongL/refseq-lookup/issues**
+Use the issue tracker of the repository hosting your copy. Include the app version, search text or accession, browser, steps to reproduce, and the displayed message or a screenshot.
 
-Please include the app version, what you typed into the search box, the UniProt or RefSeq accession concerned, your browser, steps to reproduce the problem, and what you expected to happen. Include the displayed message or a screenshot when useful.
+## Citation
 
-## Citing
+See `CITATION.cff`, or GitHub's **Cite this repository** button, for this tool's citation. Also cite the underlying databases according to their guidance, and record accession identifiers **with their versions** and the date of access so the sequences used can be traced.
 
-If you use this tool in your research, please cite the version used. Author, version and release details are kept in `CITATION.cff` in the repository; GitHub shows them under **Cite this repository**.
+## Licence
 
-Also cite UniProt and NCBI RefSeq according to their guidance, and record the accessions **with their versions** and the date of access, so the sequences you used can be traced.
-
----
-
-RefSeq lookup is an independent tool. It is not affiliated with, or endorsed by, NCBI, UniProt or any of the databases it links to.
-
-I developed this application with Claude and used GPT to review the code.
+MIT — see `LICENSE`.
