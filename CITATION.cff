@@ -1,47 +1,14 @@
-# CITATION.cff for RefSeq lookup
-#
-# GitHub reads this file and shows "Cite this repository" in the sidebar.
-# Everything you need to edit is marked  <<< REPLACE  at the end of its line.
-# The file is valid as it stands, so GitHub will show the button straight away —
-# but it will show the placeholder text until you replace it.
-# Optional fields are commented out; remove the leading "# " to use them.
-# Check the result at any time with:  pip install cffconvert && cffconvert --validate
 
 cff-version: 1.2.0
-message: "If you use this software, please cite it using the metadata from this file."
-type: software
+message: "If you use RefSeq lookup, please cite it as below."
 title: "RefSeq lookup"
-abstract: >-
-  A lightweight web app to find RefSeq protein and nucleotide records linked
-  from UniProt, copy coding sequences, and link to gene pages at MGI, HGNC,
-  FlyBase and other organism databases.
-
+version: "2.2.1"                                       
+date-released: "2026-09-19"                      
 authors:
-  - family-names: "REPLACE-FAMILY-NAME"                 # <<< REPLACE
-    given-names: "REPLACE-GIVEN-NAMES"                  # <<< REPLACE
-    affiliation: "REPLACE-INSTITUTE-OR-REMOVE-LINE"     # <<< REPLACE, or delete this line
-    # orcid: "https://orcid.org/0000-0000-0000-0000"    # <<< optional: your ORCID iD, as a full URL
-    # email: "you@example.org"                          # <<< optional: only if you want it public
-  # A second author is a second block in the same form:
-  # - family-names: "..."
-  #   given-names: "..."
+  - family-names: "Ling"             
+    given-names: "Liucong"                
+    https://orcid.org/0000-0002-1754-6902   
+repository-code: "https://github.com/LiucongL/refseq-lookup"  
+url: "https://liucongl.github.io/refseq-lookup/"           
+license: "MIT"                                        
 
-version: "2.2.1"                                        # <<< keep equal to APP_VERSION in the app and to the README
-date-released: "2026-09-17"                             # <<< REPLACE with the date you publish this version (YYYY-MM-DD)
-
-repository-code: "https://github.com/REPLACE-USERNAME/REPLACE-REPOSITORY"   # <<< REPLACE: same address as REPO_URL in the app
-url: "https://REPLACE-USERNAME.github.io/REPLACE-REPOSITORY/"               # <<< REPLACE: the GitHub Pages address of the app
-
-# license: "MIT"                                        # <<< optional: once you add a LICENSE file, put its SPDX identifier
-                                                        #     here (MIT, Apache-2.0, GPL-3.0-or-later, ...) and uncomment
-
-keywords:
-  - RefSeq
-  - UniProt
-  - NCBI
-  - protein
-  - coding sequence
-  - mouse
-  - bioinformatics
-
-# doi: "10.5281/zenodo.0000000"                         # <<< optional: if you archive a release on Zenodo, its DOI

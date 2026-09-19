@@ -10,9 +10,9 @@ A link can open the app on a protein directly, so another page (Protein Explorer
 
 Current version: **v2.2.1**, shown beside the app name in the header and in the footer.
 
-- **Open the app:** **[REPLACE WITH YOUR GITHUB PAGES URL]** — no account needed.
-- **Source code and releases:** **[REPLACE WITH YOUR GITHUB REPOSITORY URL]**
-- **Institute download mirror:** **[REPLACE WITH YOUR GITLAB REPOSITORY URL, OR REMOVE THIS LINE]**
+- **Open the app:** **https://liucongl.github.io/refseq-lookup/** — no account needed.
+- **Source code and releases:** **https://github.com/LiucongL/refseq-lookup**
+
 
 ## What you get
 
@@ -75,7 +75,7 @@ Two lines at the top of the script in `index.html` are the release settings. `AP
 
 ## Reporting problems
 
-**Issue tracker:** **[REPLACE WITH YOUR GITHUB ISSUES URL]**
+**Issue tracker:** **https://github.com/LiucongL/refseq-lookup/issues**
 
 Please include the app version, what you typed into the search box, the UniProt or RefSeq accession concerned, your browser, steps to reproduce the problem, and what you expected to happen. Include the displayed message or a screenshot when useful.
 
